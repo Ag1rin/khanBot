@@ -13,102 +13,117 @@ from telegram.ext import (
     filters
 )
 import openai
+import logging
 
-# 🛠 تنظیمات ربات
-TELEGRAM_BOT_TOKEN = ''
-OPENAI_API_KEY = ''
-ADMIN_ID = 51514121
-FORCE_JOIN_CHANNEL = "@"
+# Configure logging for better debugging and monitoring
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# 🔐 اتصال به OpenAI
+# Bot settings - Use environment variables or config file in production
+TELEGRAM_BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE'
+OPENAI_API_KEY = 'YOUR_OPENAI_API_KEY_HERE'
+ADMIN_ID = 123456789  # Replace with your admin Telegram user ID
+FORCE_JOIN_CHANNEL = '@your_channel_username'  # Channel users must join
+
+# Connect to OpenAI
 openai.api_key = OPENAI_API_KEY
 
-# 🎛 دکمه‌های شیشه‌ای
+# Inline buttons for quick actions
 def get_inline_buttons():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛍 مشاهده محصولات", url="https://khanlaptop.ir")],
-        [InlineKeyboardButton("📞 مشاوره تلفنی", callback_data="phone_consult")]
+        [InlineKeyboardButton("🛍 View Products", url="https://your-website.com")],
+        [InlineKeyboardButton("📞 Phone Consultation", callback_data="phone_consult")]
     ])
 
-# ⌨️ دکمه‌های دائمی پایین صفحه
+# Persistent keyboard buttons at the bottom
 def get_persistent_keyboard():
     return ReplyKeyboardMarkup(
-        [['📞 مشاوره تلفنی'], ['🛍 محصولات', '❓ راهنما']],
+        [['📞 Phone Consultation'], ['🛍 Products', '❓ Help']],
         resize_keyboard=True
     )
 
-# ✅ بررسی عضویت کاربر در کانال
+# Check if user is a member of the required channel
 async def is_user_member(context, user_id):
     try:
         member = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL, user_id)
         return member.status in ['member', 'creator', 'administrator']
-    except:
+    except Exception as e:
+        logger.error(f"Error checking membership: {e}")
         return False
 
-# /start
+# /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not await is_user_member(context, user_id):
         await update.message.reply_text(
-            "برای استفاده از ربات لطفاً ابتدا در کانال ما عضو شوید 👇\nhttps://t.me/khanlaptop"
+            "To use the bot, please join our channel first 👇\nhttps://t.me/your_channel_username"
         )
         return
-
     await update.message.reply_text(
-        "خوش آمدی! لطفاً یکی از گزینه‌های زیر را انتخاب کن 👇",
+        "Welcome! Please select one of the options below 👇",
         reply_markup=get_inline_buttons()
     )
 
-# 📲 هندل کردن کلیک روی دکمه‌های شیشه‌ای
+# Handle inline button clicks
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     if query.data == "phone_consult":
         await query.message.reply_text(
-            "لطفاً نام و شماره تماس خود را وارد کنید تا با شما تماس بگیریم. 📞"
+            "Please enter your name and contact number so we can reach out. 📞"
         )
 
-# 💬 هندل کردن پیام‌های متنی
+# Handle text messages
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user = update.message.from_user
-
-    # دکمه مشاوره تلفنی فشرده شده
-    if text == "📞 مشاوره تلفنی":
-        await update.message.reply_text("لطفاً نام و شماره تماس خود را وارد کنید. 📱")
+    
+    # Handle persistent keyboard selections
+    if text == "📞 Phone Consultation":
+        await update.message.reply_text("Please enter your name and contact number. 📱")
         return
-
-    # اگر پیام شامل شماره تلفن بود، بفرست برای ادمین
+    elif text == "🛍 Products":
+        await update.message.reply_text("Check out our products here: https://your-website.com")
+        return
+    elif text == "❓ Help":
+        await update.message.reply_text("How can I assist you? Ask about products, consultations, or general queries.")
+        return
+    
+    # If message likely contains a phone number (basic check), forward to admin
     if len(text) >= 7 and any(char.isdigit() for char in text):
-        msg = f"📞 درخواست مشاوره تلفنی جدید:\n\n👤 نام: {user.first_name} @{user.username or 'بدون آیدی'}\n📝 پیام:\n{text}"
-        await context.bot.send_message(chat_id=ADMIN_ID, text=msg)
-        await update.message.reply_text("✅ اطلاعات شما دریافت شد. به زودی با شما تماس خواهیم گرفت.")
+        msg = f"📞 New phone consultation request:\n\n👤 Name: {user.first_name} @{user.username or 'No username'}\n📝 Message:\n{text}"
+        try:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=msg)
+            await update.message.reply_text("✅ Your information has been received. We'll contact you soon.")
+        except Exception as e:
+            logger.error(f"Error sending message to admin: {e}")
+            await update.message.reply_text("❌ Error processing your request. Please try again.")
         return
-
-    # 👨‍💻 ارسال به GPT برای مشاوره خرید
-    await update.message.reply_text("در حال بررسی گزینه‌های مناسب...⏳")
+    
+    # Send query to GPT for product consultation
+    await update.message.reply_text("Analyzing suitable options...⏳")
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "شما یک مشاور حرفه‌ای خرید لپ‌تاپ هستید. بر اساس نیاز کاربر و موجودی فروشگاه، بهترین گزینه را پیشنهاد بده."},
-                {"role": "user", "content": f"{text}\nلطفاً با توجه به لیست محصولات پیشنهاد بده."}
+                {"role": "system", "content": "You are a professional product consultant. Suggest the best options based on user needs and available inventory."},
+                {"role": "user", "content": f"{text}\nPlease suggest based on the product list."}
             ]
         )
         reply = response['choices'][0]['message']['content']
         await update.message.reply_text(reply)
     except Exception as e:
-        await update.message.reply_text("❌ خطا در دریافت پاسخ از هوش مصنوعی. لطفاً دوباره تلاش کنید.")
-        print(e)
+        logger.error(f"OpenAI API error: {e}")
+        await update.message.reply_text("❌ Error getting response from AI. Please try again.")
 
-# ▶️ اجرای ربات
+# Run the bot
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    print("✅ ربات KhanLaptopBot روشن شد.")
+    logger.info("✅ Bot is running.")
     app.run_polling()
